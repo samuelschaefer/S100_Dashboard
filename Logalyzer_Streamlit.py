@@ -5,9 +5,7 @@ Created on Tue Mar  3 09:22:11 2026
 """
 
 import streamlit as st
-import matplotlib.pyplot as plt
 import numpy as np
-import apxreader as rd
 import pandas as pd
 import plotly.graph_objects as go
 from dataclasses import dataclass
