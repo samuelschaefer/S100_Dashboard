@@ -1,6 +1,7 @@
 name: ess_development
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - altair=6.0.0
   - archspec=0.2.5
@@ -155,7 +156,6 @@ dependencies:
   - pixman=0.46.4
   - pkginfo=1.12.1.2
   - platformdirs=4.5.0
-  - plotly=6.5.0
   - pluggy=1.5.0
   - prompt-toolkit=3.0.52
   - prompt_toolkit=3.0.52
@@ -236,7 +236,6 @@ dependencies:
   - zstandard=0.24.0
   - zstd=1.5.7
   - pip:
-      - inquirerpy==0.3.4
-      - pfzy==0.3.4
-      - wcwidth==0.6.0
+      - plotly
+      - streamlit
 prefix: C:\Users\sschaefer\AppData\Local\miniconda3\envs\ess_development
