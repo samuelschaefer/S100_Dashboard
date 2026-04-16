@@ -315,12 +315,15 @@ with st.expander("Data Library", expanded=True, icon=":material/library_books:")
         
         if num_cols > len(df_files.columns):
             with data_files_cols[-1]:
-                if st.button("Add File", icon=":material/add:", width="stretch"):
+                if st.button("Add Data File", icon=":material/add:", width="stretch"):
                     load_data_file()
 
 if st.session_state.file_library != {}:    
     #Sidebar
-    st.sidebar.header("Options")
+    st.sidebar.header("Yield Options")
+    yd_plot_bin_1 = st.sidebar.toggle("Show Good Bins", value=True)
+    yd_bar_count = st.sidebar.select_slider("Number of bins:", list(range(5,13)) + ['All'], value=7, help="Select the number of bars to show on the yield summary.")
+    st.sidebar.header("Plot Options")
     file_to_plot = st.sidebar.selectbox("Source File", [ds.Label for ds in lib.values()] + (["Combine All", "Compare All", "Select..."] if len(lib) > 1 else []), label_visibility="visible", index=0, help="Select the file for which to plot data. ")
     
     plot_series = []
@@ -369,7 +372,62 @@ if st.session_state.file_library != {}:
 
     show_all_bins = st.sidebar.toggle("Show All Bins")
     draw_limits = st.sidebar.toggle("Toggle Limits")
-    
+
+#Yield Plot
+    with st.expander("Yield", expanded=True, icon=":material/paid:"):
+        num_cols = len(lib) + 1 if len(lib) < 4 else len(lib)
+        data_files_cols = st.columns(num_cols, gap="xsmall")
+        fig_yields = [go.Figure() for i in range(len(lib))]
+        for i,(name,ds) in enumerate(lib.items()):
+            #Get yield data for this file
+           
+            yield_values = []
+            for col in ds.Data.columns[ds.Info.DataCol:]:
+                failures = (ds.Data[col] > ds.Headers.loc["UpLimit", col]) | (ds.Data[col] < ds.Headers.loc["DownLimit", col])
+                if failures.sum() > 0:
+                    bin_codes = ds.Data.loc[failures, "Bin#"].unique()
+                else:
+                    bin_codes = []
+                yield_values.append([failures.sum()/ len(ds.Data) * 100.0, ",".join([str(b) for b in bin_codes])])
+
+            if yd_plot_bin_1:           
+                yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 1) / len(ds.Data) * 100.0, 1])
+                yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 2) / len(ds.Data) * 100.0, 2])
+                yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 5) / len(ds.Data) * 100.0, 5])
+                yield_df = pd.DataFrame(yield_values, index=pd.Index(list(ds.Data.columns[ds.Info.DataCol:]) + ["GOOD", "TIER2", "PREMIUM"]), columns=["Yield Loss", "Bin Codes"])
+            else:
+                yield_df = pd.DataFrame(yield_values, index=ds.Data.columns[ds.Info.DataCol:], columns=["Yield Loss", "Bin Codes"])
+            yield_df = yield_df[~yield_df.index.str.contains('READ_S2M_BINARY')]   #Remove all REG_READ values, because those are not logged correclty byt default.
+            #yield_df_plot = yield_df[yield_df["Yield Loss"] > 0.5]
+            
+            yield_df_plot = yield_df.sort_values("Yield Loss", ascending=False)
+            if yd_bar_count == "All":
+                yield_df_plot = yield_df_plot[yield_df_plot["Yield Loss"] > 0.0]
+            else:
+                yield_df_plot = yield_df_plot.head(int(yd_bar_count))
+
+            with data_files_cols[i]:   
+                fig_yields[i].add_trace(go.Bar(
+                    x = yield_df_plot["Yield Loss"],
+                    y = [f"{name} <b>({ yield_df_plot.loc[name,"Bin Codes"]})</b>" for name in yield_df_plot.index],
+                    text = ["{0:.2f}%".format(yl) for yl in yield_df_plot["Yield Loss"]],
+                    orientation = "h",
+                    textposition="auto", 
+                    marker=dict(
+                        color=plcolors(i, 0.5, cmap),
+                        line=dict(
+                            color=plcolors(i, 1.0, cmap),
+                            width=1)
+                        ),
+                ))
+                fig_yields[i].update_layout(
+                        title = f"{ds.Label} Yield Summary",
+                        yaxis=dict(autorange="reversed"),
+                    )
+                st.plotly_chart(fig_yields[i])
+
+
+#Distribution Plots
     with st.expander("Plots", expanded=True, icon=":material/bar_chart:"):
         if plot_series != []:
             
@@ -417,10 +475,10 @@ if st.session_state.file_library != {}:
                 barmode="overlay",
                 bargap=0.0, # The gap between bars
                 legend=dict(orientation="h", # Horizontal legend (like a footer)
-                                            yanchor="bottom",
-                                            y=1.02,
-                                            xanchor="right",
-                                            x=1)
+                            yanchor="top",
+                            y=-0.15,
+                            xanchor="center",
+                            x=0.5)
             ) 
             
             fig_trends = go.Figure()
@@ -446,10 +504,10 @@ if st.session_state.file_library != {}:
                         yaxis_title="suffix [units]",
                         showlegend=True,
                         legend=dict(orientation="h", # Horizontal legend (like a footer)
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1)
+                            yanchor="top",
+                            y=-0.15,
+                            xanchor="center",
+                            x=0.5)
                         )
             col1, col2 = st.columns(2)
             with col1:
