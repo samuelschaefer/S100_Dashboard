@@ -4,6 +4,8 @@ Created on Tue Mar  3 09:22:11 2026
 @author: sschaefer
 """
 
+import time
+
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -168,7 +170,7 @@ def load_data_file():
         df_headers.columns = df_data.columns
 
         for i,c in enumerate(df_data.columns):
-            print(c)
+            #print(c)
             df_data[c] = pd.to_numeric(df_data[c], errors='coerce')
         for i,c in enumerate(df_headers.columns.to_list()[log_info.DataCol:]):
             df_headers[c] = pd.to_numeric(df_headers[c], errors='coerce')
@@ -302,7 +304,7 @@ with st.expander("Data Library", expanded=True, icon=":material/library_books:")
         ]
         df_files = pd.DataFrame(df_files_data, index=["Lot", "Test Time","Handler","Tester", "Test Step", "Device Count","Yield", "Sites", "Label"], columns=[ds.Name for ds in lib.values()])
         
-        data_files_cols = st.columns(num_cols, gap="xsmall")
+        data_files_cols = st.columns([0.9 / (num_cols-1) for i in range(num_cols-1)] + [0.1], gap="xsmall", vertical_alignment="center")
     
         for i, col_name in enumerate(df_files.columns):
             with data_files_cols[i]:
@@ -315,14 +317,15 @@ with st.expander("Data Library", expanded=True, icon=":material/library_books:")
         
         if num_cols > len(df_files.columns):
             with data_files_cols[-1]:
-                if st.button("Add Data File", icon=":material/add:", width="stretch"):
+                if st.button("Add", icon=":material/add:", width="stretch", type="primary"):
                     load_data_file()
 
 if st.session_state.file_library != {}:    
     #Sidebar
     st.sidebar.header("Yield Options")
-    yd_plot_bin_1 = st.sidebar.toggle("Show Good Bins", value=True)
-    yd_bar_count = st.sidebar.select_slider("Number of bins:", list(range(5,13)) + ['All'], value=7, help="Select the number of bars to show on the yield summary.")
+    yd_from_binno = st.sidebar.radio("Yield Source:", ["Bin#", "Raw Data"], horizontal=True, help="Select whether to calculate yield bins from the data or from the bin results. If using Raw Data, only those bins that have been loaded will be shown.")
+    yd_plot_bin_1 = st.sidebar.toggle("Show Good Bins", value=True, help="Toggle whether to include the GOOD/TIER2/PREMIUM bins in the yield summary.")
+    yd_bar_count = st.sidebar.select_slider("Yield Bin Count:", list(range(7,17)) + ['All'], value=7, help="Select the number of bars to show on the yield summary.")
     st.sidebar.header("Plot Options")
     file_to_plot = st.sidebar.selectbox("Source File", [ds.Label for ds in lib.values()] + (["Combine All", "Compare All", "Select..."] if len(lib) > 1 else []), label_visibility="visible", index=0, help="Select the file for which to plot data. ")
     
@@ -370,42 +373,61 @@ if st.session_state.file_library != {}:
 
     cmap = st.sidebar.selectbox("Color Theme", [cm for cm in color_maps], index=0, label_visibility="visible", accept_new_options=False, width="stretch")
 
-    show_all_bins = st.sidebar.toggle("Show All Bins")
-    draw_limits = st.sidebar.toggle("Toggle Limits")
+    show_full_x_range = st.sidebar.toggle("Plot Full Range", value=False, help="Toggle whether to show the full x range of the data or just the area around the limits. This can help visualize how much of the data is clustered around the limits.")
+    subsample_data = st.sidebar.toggle("Subsample Data", value=True if max([len(ds.Data) for ds in lib.values()]) > 5000 else False, help="Toggle whether to subsample the data when plotting. This can help with performance when plotting large datasets, but may make the plots less accurate.")
+    #draw_limits = st.sidebar.toggle("Toggle Limits")
 
 #Yield Plot
     with st.expander("Yield", expanded=True, icon=":material/paid:"):
         num_cols = len(lib) + 1 if len(lib) < 4 else len(lib)
-        data_files_cols = st.columns(num_cols, gap="xsmall")
+        data_files_cols = st.columns([0.9 / (num_cols-1) for i in range(num_cols-1)] + [0.1], gap="xsmall")
         fig_yields = [go.Figure() for i in range(len(lib))]
         for i,(name,ds) in enumerate(lib.items()):
             #Get yield data for this file
            
             yield_values = []
-            for col in ds.Data.columns[ds.Info.DataCol:]:
-                failures = (ds.Data[col] > ds.Headers.loc["UpLimit", col]) | (ds.Data[col] < ds.Headers.loc["DownLimit", col])
-                if failures.sum() > 0:
-                    bin_codes = ds.Data.loc[failures, "Bin#"].unique()
-                else:
-                    bin_codes = []
-                yield_values.append([failures.sum()/ len(ds.Data) * 100.0, ",".join([str(b) for b in bin_codes])])
-
-            if yd_plot_bin_1:           
-                yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 1) / len(ds.Data) * 100.0, 1])
-                yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 2) / len(ds.Data) * 100.0, 2])
-                yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 5) / len(ds.Data) * 100.0, 5])
-                yield_df = pd.DataFrame(yield_values, index=pd.Index(list(ds.Data.columns[ds.Info.DataCol:]) + ["GOOD", "TIER2", "PREMIUM"]), columns=["Yield Loss", "Bin Codes"])
-            else:
-                yield_df = pd.DataFrame(yield_values, index=ds.Data.columns[ds.Info.DataCol:], columns=["Yield Loss", "Bin Codes"])
-            yield_df = yield_df[~yield_df.index.str.contains('READ_S2M_BINARY')]   #Remove all REG_READ values, because those are not logged correclty byt default.
-            #yield_df_plot = yield_df[yield_df["Yield Loss"] > 0.5]
             
+            if yd_from_binno == "Raw Data" :
+                for col in ds.Data.columns[ds.Info.DataCol:]:
+                    failures_mask = (ds.Data[col] > ds.Headers.loc["UpLimit", col]) | (ds.Data[col] < ds.Headers.loc["DownLimit", col])
+                    col_idx = ds.Data.columns.get_loc(col)
+                    next_col_data = ds.Data.iloc[failures_mask.values, col_idx+1] if col_idx+1 < len(ds.Data.columns) else None
+                    if failures_mask.sum() > 0 and (next_col_data is None or (next_col_data is not None and next_col_data.isna().any())):
+                        bin_codes = ds.Data.loc[failures_mask, "Bin#"].unique()
+                        yield_values.append([failures_mask.sum()/ len(ds.Data) * 100.0, ",".join([str(b) for b in bin_codes])])
+                    else:
+                        bin_codes = []
+                        yield_values.append([0, ",".join([str(b) for b in bin_codes])])
+
+                if yd_plot_bin_1:           
+                    yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 1) / len(ds.Data) * 100.0, 1])
+                    yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 2) / len(ds.Data) * 100.0, 2])
+                    yield_values.append([np.count_nonzero(ds.Data["Bin#"] == 5) / len(ds.Data) * 100.0, 5])
+                    yield_df = pd.DataFrame(yield_values, index=pd.Index(list(ds.Data.columns[ds.Info.DataCol:]) + ["GOOD", "TIER2", "PREMIUM"]), columns=["Yield Loss", "Bin Codes"])
+                else:
+                    yield_df = pd.DataFrame(yield_values, index=ds.Data.columns[ds.Info.DataCol:] , columns=["Yield Loss", "Bin Codes"])
+                yield_df = yield_df[~yield_df.index.str.contains('READ_S2M_BINARY')]   #Remove all REG_READ values, because those are not logged correclty by default.
+                #yield_df_plot = yield_df[yield_df["Yield Loss"] > 0.5]
+                missing_bins_loss = 100.0 - sum([b[0] for b in yield_values]) if yd_plot_bin_1 else 100.0 - sum([b[0] for b in yield_values]) - ((np.count_nonzero(ds.Data["Bin#"] == 1) + np.count_nonzero(ds.Data["Bin#"] == 2) + np.count_nonzero(ds.Data["Bin#"] == 5)) / len(ds.Data) * 100.0)
+                        
+            else:
+                for bin_code in ds.Data["Bin#"].unique():
+                    bin_mask = ds.Data["Bin#"] == bin_code
+                    if bin_code not in [1,2,5] or yd_plot_bin_1:
+                        yield_values.append([bin_mask.sum() / len(ds.Data) * 100.0, bin_code])
+                yield_df = pd.DataFrame(yield_values, index=[f"Bin# {b[1]}" for b in yield_values], columns=["Yield Loss", "Bin Codes"])
+            
+            
+                
             yield_df_plot = yield_df.sort_values("Yield Loss", ascending=False)
             if yd_bar_count == "All":
                 yield_df_plot = yield_df_plot[yield_df_plot["Yield Loss"] > 0.0]
             else:
                 yield_df_plot = yield_df_plot.head(int(yd_bar_count))
-
+            
+            missing_bins_loss = 100.0 - sum([b[0] for b in yield_values]) if yd_plot_bin_1 else 100.0 - sum([b[0] for b in yield_values]) - ((np.count_nonzero(ds.Data["Bin#"] == 1) + np.count_nonzero(ds.Data["Bin#"] == 2) + np.count_nonzero(ds.Data["Bin#"] == 5)) / len(ds.Data) * 100.0)
+            if missing_bins_loss > 0.0001:
+                yield_df_plot = pd.concat([yield_df_plot, pd.DataFrame([[missing_bins_loss, "UNKNOWN/MISSING"]], index=["UNKNOWN/MISSING"], columns=["Yield Loss", "Bin Codes"])])
             with data_files_cols[i]:   
                 fig_yields[i].add_trace(go.Bar(
                     x = yield_df_plot["Yield Loss"],
@@ -425,7 +447,6 @@ if st.session_state.file_library != {}:
                         yaxis=dict(autorange="reversed"),
                     )
                 st.plotly_chart(fig_yields[i])
-
 
 #Distribution Plots
     with st.expander("Plots", expanded=True, icon=":material/bar_chart:"):
@@ -449,13 +470,13 @@ if st.session_state.file_library != {}:
             x_max_data = np.max(np.array([d[n].max() for n,d in traces.items()]))
             x_min_data = np.min(np.array([d[n].min() for n,d in traces.items()]))   
             x_bin_start = np.min([np.min(np.array([d[n].min() for n,d in traces.items()]))-bin_size/2.0, x_min_limit])           
-
             
+            start_time = time.time()
             #Histogram
             fig_dist = go.Figure()  
             for i, (name,df) in enumerate(traces.items()):          
                 fig_dist.add_trace(go.Histogram(
-                    x=df[name],
+                    x=df[name] if not subsample_data else df[name].sample(frac=0.1, random_state=1),
                     name=name.replace('[', "<b>[").replace("]", "]</b>"),
                     marker=dict(
                         color=plcolors(i, 0.5, cmap),
@@ -470,7 +491,7 @@ if st.session_state.file_library != {}:
                 title_text='Measurement Distribution',
                 height = 600,
                 xaxis_title_text="suffix [units]",
-                xaxis=dict(range=[x_min_data if show_all_bins else x_min_limit, x_max_data if show_all_bins else x_max_limit]),
+                xaxis=dict(range=[x_min_data if show_full_x_range else x_min_limit, x_max_data if show_full_x_range else x_max_limit]),
                 yaxis_title_text='device count',
                 barmode="overlay",
                 bargap=0.0, # The gap between bars
@@ -483,9 +504,9 @@ if st.session_state.file_library != {}:
             
             fig_trends = go.Figure()
             for i, (name,df) in enumerate(traces.items()):
-                fig_trends.add_trace(go.Scatter(
-                    x=df['Serial#'], 
-                    y=df[name], 
+                fig_trends.add_trace(go.Scattergl(
+                    x=df['Serial#'] if not subsample_data else df['Serial#'][::10], 
+                    y=df[name] if not subsample_data else df[name][::10], 
                     mode='markers', 
                     marker=dict(
                             size=1,
@@ -514,8 +535,7 @@ if st.session_state.file_library != {}:
                 st.plotly_chart(fig_dist, use_container_width=True)
             with col2:
                 st.plotly_chart(fig_trends, use_container_width=True)
-
-
+            print("Time to generate plots: {0:.1f} ms".format((time.time() - start_time)*1000))
             #Calculate summary statistics
             summary_table = []
             for i,(n,limit) in enumerate(limits.items()):
