@@ -117,7 +117,7 @@ class ProgramDefinition:
     plans:List[TestPlanDefinition] #Hold all the test plans access by their 
     device:str  #Device Variant
     program:str #Test Step, FT/QA, Temperature
-    bin_definitions:Dict[int, str] = None
+    bin_definitions:Dict[int, str] = {}
 
     def __init__(self, excel_file):  #sheet must be a openpyxl worksheet object. 
         self.plans = []
@@ -126,6 +126,7 @@ class ProgramDefinition:
         for sheet in wb.worksheets:
             if sheet.title.startswith("_"):
                 if sheet.title == "_BIN_DEFINITIONS_":
+
                     for erow in sheet.iter_rows(values_only=True, min_row=7, min_col=1, max_col=2):
                         self.bin_definitions[int(erow[0])] = str(erow[1])
                 #ignore the summary information for now.
@@ -195,7 +196,7 @@ class ProgramDefinition:
             return alias_list
 
     def getNameForBinno(self, binno:int):  #Get the name (from _BIN_DEFINITIONS_, simplified log_alias or PLAN for a binno
-        if self.bin_definitions is not None and binno in self.bin_definitions:  #Grab the bin definitions from the _BIN_DEFINTIONS_ sheet.
+        if self.bin_definitions != {} and binno in self.bin_definitions:  #Grab the bin definitions from the _BIN_DEFINTIONS_ sheet.
             return self.bin_definitions[binno]
         
         if binno == 1:
@@ -264,7 +265,18 @@ def load_sanitize_csv(uploaded_file_stream):
     uploaded_file_virtual = io.BytesIO(uploaded_file_stream)
     uploaded_file_content = uploaded_file_stream.decode("utf-8")
     log = uploaded_file_content.splitlines()
-    log_info = {}
+    log_info = { "ProgramName" : None,
+                "LotID" : None,
+                "Operator" : None,
+                "Loadboard" : None,
+                "Handler" : None,
+                "Tester" : None,
+                "TestStep" : None,
+                "StartDate" : None,
+                "StartDate" : None,
+                "HeaderBlockStart" : None,
+                "DataCol" : None,
+                "HeaderRow" : None }
 
     for i,row in enumerate(log):
         cnts = row.split(',')
@@ -717,7 +729,7 @@ with st.expander("Data Library", expanded=True, icon=":material/library_books:")
             [ds.Metadata["TestStep"] for ds in lib.values()],
             [ds.Metadata["Handler"] for ds in lib.values()],
             [ds.Metadata["Tester"] for ds in lib.values()],
-            ["{0} ({1})".format("Single" if ds.Data["Site#"].unique().sum() == 1 else "Dual", ",".join([str(s) for s in ds.Data["Site#"].unique()])) for ds in lib.values()],
+            ["{0} ({1})".format("Single" if len(ds.Data["Site#"].unique()) == 1 else "Dual", ",".join([str(s) for s in ds.Data["Site#"].unique()])) for ds in lib.values()],
             [ds.Metadata["ProgramName"] for ds in lib.values()],
         ]
 
